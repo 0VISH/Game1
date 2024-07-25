@@ -11,9 +11,6 @@
 #define MONSTER_VEL_X  100
 #define PLAYER_FOOT_HEIGHT 5
 
-void gameReload(void *gameMem, u64 memSize){
-	mem::reload(gameMem, memSize);
-};
 struct Player{
 	Vector2 pos;
 	Vector2 vel;
@@ -30,11 +27,23 @@ struct Monster{
 struct Block{
 	Vector2 pos;
 };
-Camera2D camera;
-Player   player;
-Array<Platform> plats;
-Array<Block>    blocks;
-Array<Monster>  monsters;
+struct Scene{
+	Player player;
+	Camera2D camera;
+	Array<Block> blocks;
+	Array<Platform> plats;
+	Array<Monster> monsters;
+};
+struct GlobalState{
+	Scene curScene;
+	u32   screenX;
+	u32   screenY;
+};
+GlobalState *state;
+void gameReload(void *gameMem){
+	state = (GlobalState*)gameMem;
+};
+
 Platform PlacePlatform(f32 x, f32 y, f32 width, f32 height){
 	Platform plat;
 	plat.rec.x = x;
@@ -54,30 +63,47 @@ Monster PlaceMonster(f32 x, f32 y, f32 velx=MONSTER_VEL_X, f32 vely=0){
 	monster.vel = {velx, vely};
 	return monster;
 };
-EXPORT void gameInit(void *gameMem, u64 memSize){
-	plats.init(2);
-	blocks.init(2);
-	monsters.init(1);
+void buildScene1(){
+	Scene &scene = state->curScene;
 
-	camera.target = {0.0};
-	camera.offset = { 1800/2.0f, 900/2.0f };
-	camera.rotation = 0.0f;
-	camera.zoom = 1.0f;
+	scene.plats.init(2);
+	scene.blocks.init(2);
+	scene.monsters.init(1);
 
-	player.pos = {200, -100};
-	player.vel = {0.0};
-	player.aura = {300, 100};
-	player.isGround = true;
-	
-	monsters.push(PlaceMonster(20, -50 - MONSTER_HEIGHT));
+	scene.camera.target = {0.0};
+	scene.camera.offset = { 1800/2.0f, 900/2.0f };
+	scene.camera.rotation = 0.0f;
+	scene.camera.zoom = 1.0f;
 
-	plats.push(PlacePlatform(100, 0, 500, 300));
-	plats.push(PlacePlatform(-10, -50, 200, 10));
+	scene.player.pos = {200, -100};
+	scene.player.vel = {0.0};
+	scene.player.aura = {300, 100};
+	scene.player.isGround = true;
 
-	blocks.push(PlaceBlock(-10, -50 - BLOCK_HEIGHT));
-	blocks.push(PlaceBlock(-10 + 200 - BLOCK_WIDTH, -50 - BLOCK_HEIGHT));
+	scene.monsters.push(PlaceMonster(20, -50 - MONSTER_HEIGHT));
+
+	scene.plats.push(PlacePlatform(100, 0, 500, 300));
+	scene.plats.push(PlacePlatform(-10, -50, 200, 10));
+
+	scene.blocks.push(PlaceBlock(-10, -50 - BLOCK_HEIGHT));
+	scene.blocks.push(PlaceBlock(-10 + 200 - BLOCK_WIDTH, -50 - BLOCK_HEIGHT));
+};
+void destroyScene1(){
+	Scene &scene = state->curScene;
+	scene.plats.uninit();
+	scene.blocks.uninit();
+	scene.monsters.uninit();
+};
+
+EXPORT void gameInit(void *gameMem){
+	buildScene1();	
 };
 EXPORT void gameUpdate(f32 dt){
+	Scene &scene = state->curScene;
+	Player &player = scene.player;
+	Array<Monster> &monsters = scene.monsters;
+	Array<Block>   &blocks   = scene.blocks;
+	Array<Platform> &plats   = scene.plats;
 	if(IsKeyDown(KEY_SPACE) && player.isGround){
 		player.vel.y = -800;
 	};
@@ -109,7 +135,7 @@ EXPORT void gameUpdate(f32 dt){
 	auraRec.width = 100 + player.aura.x*2;
 	auraRec.height = 100 + player.aura.y*2;
 	if(CheckCollisionRecs(auraRec, monsterRec)) canSwap=true;
-	if(canSwap && IsKeyPressed(KEY_R)){
+	if(canSwap && IsKeyPressed(KEY_U)){
 		Vector2 temp = closestM->pos;
 		closestM->pos = player.pos;
 		player.pos = temp;
@@ -117,7 +143,7 @@ EXPORT void gameUpdate(f32 dt){
 	BeginDrawing();
 	ClearBackground(BLACK);
 	DrawFPS(0,0);
-	BeginMode2D(camera);
+	BeginMode2D(scene.camera);
 	DrawRectangleV(player.pos, {PLAYER_WIDTH, PLAYER_HEIGHT-PLAYER_FOOT_HEIGHT}, RED);
 	DrawRectangle(player.pos.x, player.pos.y + PLAYER_HEIGHT - PLAYER_FOOT_HEIGHT, PLAYER_WIDTH, PLAYER_FOOT_HEIGHT, YELLOW);
 	for(u32 x=0; x<plats.count; x++){
@@ -135,6 +161,11 @@ EXPORT void gameUpdate(f32 dt){
 	EndDrawing();
 };
 EXPORT void gamePhyUpdate(){
+	Scene &scene = state->curScene;
+	Player &player = scene.player;
+	Array<Monster> &monsters = scene.monsters;
+	Array<Block>   &blocks   = scene.blocks;
+	Array<Platform> &plats   = scene.plats;
 	Rectangle playerFootRec;
 	playerFootRec.x = player.pos.x;
 	playerFootRec.y = player.pos.y + PLAYER_HEIGHT - PLAYER_FOOT_HEIGHT;
@@ -213,5 +244,6 @@ EXPORT void gamePhyUpdate(){
 	};
 };
 EXPORT void gameUninit(){
+	destroyScene1();
 	clog("Bye from game 1");
 };

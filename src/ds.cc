@@ -1,5 +1,3 @@
-#include <malloc.h>
-
 //array whose length is not known at comptime
 template<typename T>
 struct Array {
@@ -9,9 +7,13 @@ struct Array {
 	void init(const u32 length){
 		count = 0;
 		len = length;
-		mem = (T*)malloc(sizeof(T)*len);
+		mem = (T*)alloc(sizeof(T)*len);
 	};
-	void uninit(){free(mem);};
+	void uninit(){
+		afree(mem);
+		len = 0;
+		count = 0;
+	};
 	T& operator[](const u32 index) {
 #if(DBG)
 		if(index >= len) {
