@@ -10,12 +10,21 @@
 #define PLAYER_WIDTH   100
 #define MONSTER_VEL_X  100
 #define PLAYER_FOOT_HEIGHT 5
+#define DOOR_WIDTH     70
+#define DOOR_HEIGHT    80
+#define KEY_WIDTH      10
+#define KEY_HEIGHT     20
+
+enum class PlayerProp{
+	IS_GROUND,
+	HAS_KEY,
+};
 
 struct Player{
 	Vector2 pos;
 	Vector2 vel;
 	Vector2 aura;
-	b32     isGround;
+	u32     prop;
 };
 struct Platform{
 	Rectangle rec;
@@ -27,17 +36,24 @@ struct Monster{
 struct Block{
 	Vector2 pos;
 };
+struct Door{
+	Vector2 pos;
+};
+struct Key{
+	Vector2 pos;
+};
 struct Scene{
 	Player player;
 	Camera2D camera;
-	Array<Block> blocks;
-	Array<Platform> plats;
-	Array<Monster> monsters;
+	Door   door;
+	Key    key;
+	DynamicArray<Block> blocks;
+	DynamicArray<Platform> plats;
+	DynamicArray<Monster> monsters;
+	void (*loadNextLevel)();
 };
 struct GlobalState{
 	Scene curScene;
-	u32   screenX;
-	u32   screenY;
 };
 GlobalState *state;
 void gameReload(void *gameMem){
@@ -71,24 +87,35 @@ void buildScene1(){
 	scene.monsters.init(1);
 
 	scene.camera.target = {0.0};
-	scene.camera.offset = { 1800/2.0f, 900/2.0f };
+	scene.camera.offset = { GetScreenWidth()/2.0f, GetScreenHeight()/2.0f };
 	scene.camera.rotation = 0.0f;
 	scene.camera.zoom = 1.0f;
 
 	scene.player.pos = {200, -100};
 	scene.player.vel = {0.0};
 	scene.player.aura = {300, 100};
-	scene.player.isGround = true;
+	scene.player.prop = 0;
+
+	scene.door.pos = {600, -100};
+	scene.key.pos = {400, -40};
 
 	scene.monsters.push(PlaceMonster(20, -50 - MONSTER_HEIGHT));
 
-	scene.plats.push(PlacePlatform(100, 0, 500, 300));
+	scene.plats.push(PlacePlatform(100, 0, 800, 300));
 	scene.plats.push(PlacePlatform(-10, -50, 200, 10));
 
 	scene.blocks.push(PlaceBlock(-10, -50 - BLOCK_HEIGHT));
 	scene.blocks.push(PlaceBlock(-10 + 200 - BLOCK_WIDTH, -50 - BLOCK_HEIGHT));
 };
-void destroyScene1(){
+void resetCurScene(){
+	Scene &scene = state->curScene;
+	scene.plats.count = 0;
+	scene.blocks.count = 0;
+	scene.monsters.count = 0;
+	scene.loadNextLevel = nullptr;
+	scene.player = {0};
+};
+void destroyCurScene(){
 	Scene &scene = state->curScene;
 	scene.plats.uninit();
 	scene.blocks.uninit();
@@ -101,18 +128,12 @@ EXPORT void gameInit(void *gameMem){
 EXPORT void gameUpdate(f32 dt){
 	Scene &scene = state->curScene;
 	Player &player = scene.player;
-	Array<Monster> &monsters = scene.monsters;
-	Array<Block>   &blocks   = scene.blocks;
-	Array<Platform> &plats   = scene.plats;
-	if(IsKeyDown(KEY_SPACE) && player.isGround){
-		player.vel.y = -800;
-	};
-	if(IsKeyDown(KEY_D)){
-		player.vel.x = 200;
-	};
-	if(IsKeyDown(KEY_A)){
-		player.vel.x = -200;
-	};
+	DynamicArray<Monster> &monsters = scene.monsters;
+	DynamicArray<Block>   &blocks   = scene.blocks;
+	DynamicArray<Platform> &plats   = scene.plats;
+	if(IsKeyDown(KEY_SPACE) && IS_BIT(player.prop, PlayerProp::IS_GROUND)) player.vel.y = -800;
+	if(IsKeyDown(KEY_D)) player.vel.x = 200;
+	if(IsKeyDown(KEY_A)) player.vel.x = -200;
 	f64 closest = DBL_MAX;
 	Monster *closestM = nullptr;
 	for(u32 x=0; x<monsters.len; x++){
@@ -157,15 +178,36 @@ EXPORT void gameUpdate(f32 dt){
 		DrawRectangle(monster.pos.x, monster.pos.y, MONSTER_WIDTH, MONSTER_HEIGHT, (closestM == &monster)?GREEN:WHITE);
 	};
 	DrawRectangleRec(auraRec, {255, 0, 255, 50});
+	if(!IS_BIT(player.prop, PlayerProp::HAS_KEY)) DrawRectangleV(scene.key.pos, {KEY_WIDTH, KEY_HEIGHT}, BROWN);
+	DrawRectangleV(scene.door.pos, {DOOR_WIDTH, DOOR_HEIGHT}, BROWN);
 	EndMode2D();
 	EndDrawing();
 };
 EXPORT void gamePhyUpdate(){
 	Scene &scene = state->curScene;
 	Player &player = scene.player;
-	Array<Monster> &monsters = scene.monsters;
-	Array<Block>   &blocks   = scene.blocks;
-	Array<Platform> &plats   = scene.plats;
+	DynamicArray<Monster> &monsters = scene.monsters;
+	DynamicArray<Block>   &blocks   = scene.blocks;
+	DynamicArray<Platform> &plats   = scene.plats;
+	Rectangle playerRec;
+	playerRec.x = player.pos.x;
+	playerRec.y = player.pos.y;
+	playerRec.width = PLAYER_WIDTH;
+	playerRec.height = PLAYER_HEIGHT;
+	Rectangle doorRec;
+	doorRec.x = scene.door.pos.x;
+	doorRec.y = scene.door.pos.y;
+	doorRec.width = DOOR_WIDTH;
+	doorRec.height = DOOR_HEIGHT;
+	if(CheckCollisionRecs(playerRec, doorRec) && IS_BIT(player.prop, PlayerProp::HAS_KEY)){
+		clog("changing level");
+	};
+	Rectangle keyRec;
+	keyRec.x = scene.key.pos.x;
+	keyRec.y = scene.key.pos.y;
+	keyRec.width = KEY_WIDTH;
+	keyRec.height = KEY_HEIGHT;
+	if(CheckCollisionRecs(playerRec, keyRec)) SET_BIT(player.prop, PlayerProp::HAS_KEY);
 	Rectangle playerFootRec;
 	playerFootRec.x = player.pos.x;
 	playerFootRec.y = player.pos.y + PLAYER_HEIGHT - PLAYER_FOOT_HEIGHT;
@@ -184,10 +226,10 @@ EXPORT void gamePhyUpdate(){
 		if(player.vel.y > 0){
 			player.vel.y = 0;
 			player.pos.y = col->rec.y - PLAYER_HEIGHT;
-			player.isGround = true;
+			SET_BIT(player.prop, PlayerProp::IS_GROUND);
 		};
 	}else{
-		player.isGround = false;
+		CLEAR_BIT(player.prop, PlayerProp::IS_GROUND);
 		player.vel.y += 50;
 	};
 	player.pos.x += player.vel.x * dt;
@@ -214,9 +256,7 @@ EXPORT void gamePhyUpdate(){
 				monster.vel.y = 0;
 				monster.pos.y = col->rec.y - MONSTER_HEIGHT;
 			};
-		}else{
-			monster.vel.y += 50;
-		};
+		}else monster.vel.y += 50;
 		Block *bcol = nullptr;
 		for(u32 x=0; x<blocks.count; x++){
 			Block &blk = blocks[x];
@@ -244,6 +284,6 @@ EXPORT void gamePhyUpdate(){
 	};
 };
 EXPORT void gameUninit(){
-	destroyScene1();
+	destroyCurScene();
 	clog("Bye from game 1");
 };
