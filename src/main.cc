@@ -81,6 +81,10 @@ struct Scene{
 		plats.init(2);
 		blocks.init(2);
 		monsters.init(1);
+		camera.target = {0.0};
+		camera.offset = { GetScreenWidth()/2.0f, GetScreenHeight()/2.0f };
+		camera.rotation = 0.0f;
+		camera.zoom = 1.0f;
 	};
 	void uninit(){
 		freeSwapScreenShotChain(tail);
@@ -91,6 +95,7 @@ struct Scene{
 };
 struct GlobalState{
 	Scene curScene;
+	Vector2 worldBound; // NOTE: .x contains right edge and .y contains left edge world pos
 };
 GlobalState *state;
 void gameReload(void *gameMem){
@@ -119,26 +124,22 @@ Monster PlaceMonster(f32 x, f32 y, f32 velx=MONSTER_VEL_X, f32 vely=0){
 void buildScene1(){
 	Scene &scene = state->curScene;
 
-	scene.camera.target = {0.0};
-	scene.camera.offset = { GetScreenWidth()/2.0f, GetScreenHeight()/2.0f };
-	scene.camera.rotation = 0.0f;
-	scene.camera.zoom = 1.0f;
-
 	scene.player.pos = {200, -100};
 	scene.player.vel = {0.0};
 	scene.player.aura = {300, 100};
 	scene.player.prop = 0;
 
+	scene.camera.zoom = 1;
+
 	scene.door.pos = {600, -100};
-	scene.key.pos = {400, -40};
+	scene.key.pos = {-state->worldBound.x + KEY_WIDTH, -150-KEY_HEIGHT};
 
-	scene.monsters.push(PlaceMonster(20, -50 - MONSTER_HEIGHT));
+	scene.monsters.push(PlaceMonster(-state->worldBound.x + MONSTER_WIDTH, -150 - MONSTER_HEIGHT));
 
-	scene.plats.push(PlacePlatform(100, 0, 800, 300));
-	scene.plats.push(PlacePlatform(-10, -50, 200, 10));
+	scene.plats.push(PlacePlatform(-state->worldBound.x, 0, state->worldBound.x*2, 300));
+	scene.plats.push(PlacePlatform(-state->worldBound.x, -150, 500, 40));
 
-	scene.blocks.push(PlaceBlock(-10, -50 - BLOCK_HEIGHT));
-	scene.blocks.push(PlaceBlock(-10 + 200 - BLOCK_WIDTH, -50 - BLOCK_HEIGHT));
+	scene.blocks.push(PlaceBlock(-state->worldBound.x + 500 - BLOCK_WIDTH, -150 - BLOCK_HEIGHT));
 };
 void resetCurScene(){
 	Scene &scene = state->curScene;
@@ -174,19 +175,20 @@ void takeSwapScreenShot(){
 };
 EXPORT void gameInit(void *gameMem){
 	state->curScene.init();
+	state->worldBound = GetScreenToWorld2D({(float)GetScreenWidth(), (float)GetScreenHeight()}, state->curScene.camera);
 	buildScene1();	
 	takeSwapScreenShot();
 };
 EXPORT void gameUpdate(f32 dt){
 	Scene &scene = state->curScene;
 	Player &player = scene.player;
+	if(IsKeyPressed(KEY_U)) undo();
 	if(IS_BIT(player.prop, PlayerProp::IS_DEAD)){
 		BeginDrawing();
 		BeginMode2D(scene.camera);
 		DrawText("UNDO", -10, -10, 100, WHITE);
 		EndMode2D();
 		EndDrawing();
-		undo();
 		return;
 	};
 	DynamicArray<Monster> &monsters = scene.monsters;
@@ -223,7 +225,6 @@ EXPORT void gameUpdate(f32 dt){
 		closestM->pos = player.pos;
 		player.pos = temp;
 	};
-	if(IsKeyPressed(KEY_U)) undo();
 	BeginDrawing();
 	ClearBackground(BLACK);
 	DrawFPS(0,0);
@@ -263,8 +264,18 @@ EXPORT void gamePhyUpdate(){
 	doorRec.y = scene.door.pos.y;
 	doorRec.width = DOOR_WIDTH;
 	doorRec.height = DOOR_HEIGHT;
-	if(CheckCollisionRecs(playerRec, doorRec) && (IS_BIT(player.prop, PlayerProp::HAS_KEY) || IS_BIT(scene.prop, SceneProp::NO_KEY))){
-		clog("changing level");
+	if(CheckCollisionRecs(playerRec, doorRec)){
+		if(player.vel.x > 0){
+			player.vel.x = 0;
+			player.pos.x = doorRec.x - PLAYER_WIDTH;
+		};
+		if(player.vel.x < 0){
+			player.vel.x = 0;
+			player.pos.x = doorRec.x + DOOR_WIDTH;
+		};
+		if((IS_BIT(player.prop, PlayerProp::HAS_KEY) || IS_BIT(scene.prop, SceneProp::NO_KEY))){
+			clog("changing level");
+		};
 	};
 	Rectangle keyRec;
 	keyRec.x = scene.key.pos.x;
@@ -347,6 +358,7 @@ EXPORT void gamePhyUpdate(){
 				monster.pos.x = bcol->pos.x + BLOCK_WIDTH;
 			};
 		};
+		if(monster.pos.x+MONSTER_WIDTH >= state->worldBound.x || (monster.pos.x <= -state->worldBound.x)){monster.vel.x *= -1;};
 		monster.pos.x += monster.vel.x * dt;
 		monster.pos.y += monster.vel.y * dt;
 	};
