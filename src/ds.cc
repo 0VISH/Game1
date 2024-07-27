@@ -44,11 +44,6 @@ struct DynamicArray {
 	count += 1;
 	return mem[count-1];
     };
-    void reserve(u32 rCount){
-	if(count+rCount >= len){
-	    realloc(count+rCount);
-	}
-    }
 #if(DBG)
     void dumpStat() {
 	printf("\n[DYNAMIC_ARRAY] mem: %p; count: %d; len: %d\n", mem, count, len);

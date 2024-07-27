@@ -15,9 +15,15 @@
 #define KEY_WIDTH      10
 #define KEY_HEIGHT     20
 
+#define GET_MONSTERS(swapss) ((Monster*)((char*)swapss + sizeof(SwapScreenShot)))
+
 enum class PlayerProp{
 	IS_GROUND,
 	HAS_KEY,
+	IS_DEAD,
+};
+enum class SceneProp{
+	NO_KEY,
 };
 
 struct Player{
@@ -42,6 +48,18 @@ struct Door{
 struct Key{
 	Vector2 pos;
 };
+struct SwapScreenShot{
+	Player player;
+	SwapScreenShot *prev;
+	// NOTE: Monsters are saved in the consecutive memory block
+};
+void freeSwapScreenShotChain(SwapScreenShot *tail){
+	while(tail){
+		SwapScreenShot *prev = tail->prev;
+		afree(tail);
+		tail = prev;
+	};
+};
 struct Scene{
 	Player player;
 	Camera2D camera;
@@ -51,6 +69,25 @@ struct Scene{
 	DynamicArray<Platform> plats;
 	DynamicArray<Monster> monsters;
 	void (*loadNextLevel)();
+	u32 prop;
+	SwapScreenShot *cur;
+	SwapScreenShot *tail;
+
+	void init(){
+		cur = nullptr;
+		tail = nullptr;
+		prop = 0;
+		player.prop = 0;
+		plats.init(2);
+		blocks.init(2);
+		monsters.init(1);
+	};
+	void uninit(){
+		freeSwapScreenShotChain(tail);
+		plats.uninit();
+		blocks.uninit();
+		monsters.uninit();
+	};
 };
 struct GlobalState{
 	Scene curScene;
@@ -82,10 +119,6 @@ Monster PlaceMonster(f32 x, f32 y, f32 velx=MONSTER_VEL_X, f32 vely=0){
 void buildScene1(){
 	Scene &scene = state->curScene;
 
-	scene.plats.init(2);
-	scene.blocks.init(2);
-	scene.monsters.init(1);
-
 	scene.camera.target = {0.0};
 	scene.camera.offset = { GetScreenWidth()/2.0f, GetScreenHeight()/2.0f };
 	scene.camera.rotation = 0.0f;
@@ -114,20 +147,48 @@ void resetCurScene(){
 	scene.monsters.count = 0;
 	scene.loadNextLevel = nullptr;
 	scene.player = {0};
+	scene.prop = 0;
+	freeSwapScreenShotChain(scene.tail);
+	scene.cur = nullptr;
+	scene.tail = nullptr;
 };
-void destroyCurScene(){
+void undo(){
 	Scene &scene = state->curScene;
-	scene.plats.uninit();
-	scene.blocks.uninit();
-	scene.monsters.uninit();
+	SwapScreenShot *ss = scene.cur;
+	if(ss == nullptr) return;
+	scene.player = ss->player;
+	Monster *mons = GET_MONSTERS(ss);
+	memcpy(scene.monsters.mem, mons, scene.monsters.count * sizeof(Monster));
+	if(ss->prev) scene.cur = ss->prev;
 };
-
+void takeSwapScreenShot(){
+	Scene &scene = state->curScene;
+	SwapScreenShot *ss = (SwapScreenShot*)alloc(sizeof(SwapScreenShot) + sizeof(Monster)*scene.monsters.count);
+	ss->player = scene.player;
+	ss->prev = scene.cur;
+	scene.tail = ss;
+	scene.cur = ss;
+	Monster *mons = GET_MONSTERS(ss);
+	memcpy(mons, scene.monsters.mem, scene.monsters.count * sizeof(Monster));
+	scene.cur = ss;
+};
 EXPORT void gameInit(void *gameMem){
+	state->curScene.init();
 	buildScene1();	
+	takeSwapScreenShot();
 };
 EXPORT void gameUpdate(f32 dt){
 	Scene &scene = state->curScene;
 	Player &player = scene.player;
+	if(IS_BIT(player.prop, PlayerProp::IS_DEAD)){
+		BeginDrawing();
+		BeginMode2D(scene.camera);
+		DrawText("UNDO", -10, -10, 100, WHITE);
+		EndMode2D();
+		EndDrawing();
+		undo();
+		return;
+	};
 	DynamicArray<Monster> &monsters = scene.monsters;
 	DynamicArray<Block>   &blocks   = scene.blocks;
 	DynamicArray<Platform> &plats   = scene.plats;
@@ -156,11 +217,13 @@ EXPORT void gameUpdate(f32 dt){
 	auraRec.width = 100 + player.aura.x*2;
 	auraRec.height = 100 + player.aura.y*2;
 	if(CheckCollisionRecs(auraRec, monsterRec)) canSwap=true;
-	if(canSwap && IsKeyPressed(KEY_U)){
+	if(canSwap && IsKeyPressed(KEY_E)){
+		takeSwapScreenShot();
 		Vector2 temp = closestM->pos;
 		closestM->pos = player.pos;
 		player.pos = temp;
 	};
+	if(IsKeyPressed(KEY_U)) undo();
 	BeginDrawing();
 	ClearBackground(BLACK);
 	DrawFPS(0,0);
@@ -175,10 +238,10 @@ EXPORT void gameUpdate(f32 dt){
 	};
 	for(u32 x=0; x<monsters.count; x++){
 		Monster &monster = monsters[x];
-		DrawRectangle(monster.pos.x, monster.pos.y, MONSTER_WIDTH, MONSTER_HEIGHT, (closestM == &monster)?GREEN:WHITE);
+		DrawRectangle(monster.pos.x, monster.pos.y, MONSTER_WIDTH, MONSTER_HEIGHT, ((closestM == &monster) && canSwap)?GREEN:WHITE);
 	};
 	DrawRectangleRec(auraRec, {255, 0, 255, 50});
-	if(!IS_BIT(player.prop, PlayerProp::HAS_KEY)) DrawRectangleV(scene.key.pos, {KEY_WIDTH, KEY_HEIGHT}, BROWN);
+	if(!IS_BIT(player.prop, PlayerProp::HAS_KEY) && !IS_BIT(scene.prop, SceneProp::NO_KEY)) DrawRectangleV(scene.key.pos, {KEY_WIDTH, KEY_HEIGHT}, BROWN);
 	DrawRectangleV(scene.door.pos, {DOOR_WIDTH, DOOR_HEIGHT}, BROWN);
 	EndMode2D();
 	EndDrawing();
@@ -186,6 +249,7 @@ EXPORT void gameUpdate(f32 dt){
 EXPORT void gamePhyUpdate(){
 	Scene &scene = state->curScene;
 	Player &player = scene.player;
+	if(IS_BIT(player.prop, PlayerProp::IS_DEAD)) return;
 	DynamicArray<Monster> &monsters = scene.monsters;
 	DynamicArray<Block>   &blocks   = scene.blocks;
 	DynamicArray<Platform> &plats   = scene.plats;
@@ -199,7 +263,7 @@ EXPORT void gamePhyUpdate(){
 	doorRec.y = scene.door.pos.y;
 	doorRec.width = DOOR_WIDTH;
 	doorRec.height = DOOR_HEIGHT;
-	if(CheckCollisionRecs(playerRec, doorRec) && IS_BIT(player.prop, PlayerProp::HAS_KEY)){
+	if(CheckCollisionRecs(playerRec, doorRec) && (IS_BIT(player.prop, PlayerProp::HAS_KEY) || IS_BIT(scene.prop, SceneProp::NO_KEY))){
 		clog("changing level");
 	};
 	Rectangle keyRec;
@@ -244,6 +308,10 @@ EXPORT void gamePhyUpdate(){
 		monsterRect.y = monster.pos.y;
 		monsterRect.height = MONSTER_HEIGHT;
 		monsterRect.width = MONSTER_WIDTH;
+		if(CheckCollisionRecs(monsterRect, playerRec)){
+			SET_BIT(player.prop, PlayerProp::IS_DEAD);
+			return;
+		};	
 		for(u32 x=0; x<plats.count; x++){
 			Platform &plat = plats[x];
 			if(CheckCollisionRecs(plat.rec, monsterRect)){
@@ -284,6 +352,6 @@ EXPORT void gamePhyUpdate(){
 	};
 };
 EXPORT void gameUninit(){
-	destroyCurScene();
+	state->curScene.uninit();
 	clog("Bye from game 1");
 };
