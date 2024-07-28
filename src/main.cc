@@ -8,7 +8,7 @@
 #define BLOCK_WIDTH    20
 #define BLOCK_HEIGHT   20
 #define PLAYER_HEIGHT  100
-#define PLAYER_WIDTH   100
+#define PLAYER_WIDTH   80
 #define MONSTER_VEL_X  100
 #define PLAYER_FOOT_HEIGHT 5
 #define DOOR_WIDTH     70
@@ -184,10 +184,10 @@ EXPORT void gameInit(void *gameMem){
 	buildScene1();	
 	takeSwapScreenShot();
 	s32 size;
-	void *spriteSheet = state->pm.getFile("walk.png", size);
+	void *spriteSheet = state->pm.getFile("idle.png", size);
 	Image img = LoadImageFromMemory(".png", (const unsigned char*)spriteSheet, size);
 	Texture2D text = LoadTextureFromImage(img);
-	state->sa.init(text, 20, 0.5f);
+	state->sa.init(text, 20, 0.08);
 };
 EXPORT void gameUpdate(f32 dt){
 	Scene &scene = state->curScene;
@@ -237,10 +237,10 @@ EXPORT void gameUpdate(f32 dt){
 		player.pos = temp;
 	};
 	BeginDrawing();
-	ClearBackground(BLACK);
+	ClearBackground(PINK);
 	DrawFPS(0,0);
 	BeginMode2D(scene.camera);
-	DrawTextureRec(state->sa.texture, getFrame(state->sa), player.pos, WHITE);
+	DrawTexturePro(state->sa.texture, getFrame(state->sa), {player.pos.x, player.pos.y, PLAYER_WIDTH, PLAYER_HEIGHT}, {0.0, 0.0}, 0.0, WHITE);
 	for(u32 x=0; x<plats.count; x++){
 		DrawRectangleRec(plats[x].rec, BLUE);
 	};
