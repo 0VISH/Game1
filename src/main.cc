@@ -1,6 +1,7 @@
 #include "game.hh"
 #include "ds.cc"
 #include <float.h>
+#include "animation.cc"
 
 #define MONSTER_WIDTH  100
 #define MONSTER_HEIGHT 100
@@ -95,7 +96,9 @@ struct Scene{
 };
 struct GlobalState{
 	Scene curScene;
+	PackageManager pm;
 	Vector2 worldBound; // NOTE: .x contains right edge and .y contains left edge world pos
+	SpriteAnimation sa;
 };
 GlobalState *state;
 void gameReload(void *gameMem){
@@ -131,15 +134,16 @@ void buildScene1(){
 
 	scene.camera.zoom = 1;
 
-	scene.door.pos = {600, -100};
+	scene.door.pos = {400, -100};
 	scene.key.pos = {-state->worldBound.x + KEY_WIDTH, -150-KEY_HEIGHT};
 
 	scene.monsters.push(PlaceMonster(-state->worldBound.x + MONSTER_WIDTH, -150 - MONSTER_HEIGHT));
 
-	scene.plats.push(PlacePlatform(-state->worldBound.x, 0, state->worldBound.x*2, 300));
-	scene.plats.push(PlacePlatform(-state->worldBound.x, -150, 500, 40));
+	scene.plats.push(PlacePlatform(-400, 0, 1000, 300));
+	scene.plats.push(PlacePlatform(-state->worldBound.x, -150, 550, 40));
 
-	scene.blocks.push(PlaceBlock(-state->worldBound.x + 500 - BLOCK_WIDTH, -150 - BLOCK_HEIGHT));
+	scene.blocks.push(PlaceBlock(-state->worldBound.x + 550 - BLOCK_WIDTH, -150 - BLOCK_HEIGHT));
+	scene.blocks.push(PlaceBlock(-400+1000-BLOCK_WIDTH, 0-BLOCK_HEIGHT));
 };
 void resetCurScene(){
 	Scene &scene = state->curScene;
@@ -176,8 +180,14 @@ void takeSwapScreenShot(){
 EXPORT void gameInit(void *gameMem){
 	state->curScene.init();
 	state->worldBound = GetScreenToWorld2D({(float)GetScreenWidth(), (float)GetScreenHeight()}, state->curScene.camera);
+	state->pm.init("TODO:");
 	buildScene1();	
 	takeSwapScreenShot();
+	s32 size;
+	void *spriteSheet = state->pm.getFile("walk.png", size);
+	Image img = LoadImageFromMemory(".png", (const unsigned char*)spriteSheet, size);
+	Texture2D text = LoadTextureFromImage(img);
+	state->sa.init(text, 20, 0.5f);
 };
 EXPORT void gameUpdate(f32 dt){
 	Scene &scene = state->curScene;
@@ -191,6 +201,7 @@ EXPORT void gameUpdate(f32 dt){
 		EndDrawing();
 		return;
 	};
+	updateAnimation(state->sa, dt);
 	DynamicArray<Monster> &monsters = scene.monsters;
 	DynamicArray<Block>   &blocks   = scene.blocks;
 	DynamicArray<Platform> &plats   = scene.plats;
@@ -229,8 +240,7 @@ EXPORT void gameUpdate(f32 dt){
 	ClearBackground(BLACK);
 	DrawFPS(0,0);
 	BeginMode2D(scene.camera);
-	DrawRectangleV(player.pos, {PLAYER_WIDTH, PLAYER_HEIGHT-PLAYER_FOOT_HEIGHT}, RED);
-	DrawRectangle(player.pos.x, player.pos.y + PLAYER_HEIGHT - PLAYER_FOOT_HEIGHT, PLAYER_WIDTH, PLAYER_FOOT_HEIGHT, YELLOW);
+	DrawTextureRec(state->sa.texture, getFrame(state->sa), player.pos, WHITE);
 	for(u32 x=0; x<plats.count; x++){
 		DrawRectangleRec(plats[x].rec, BLUE);
 	};
@@ -365,5 +375,6 @@ EXPORT void gamePhyUpdate(){
 };
 EXPORT void gameUninit(){
 	state->curScene.uninit();
+	state->pm.uninit();
 	clog("Bye from game 1");
 };
