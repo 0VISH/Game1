@@ -9,7 +9,7 @@
 #define BLOCK_HEIGHT   20
 #define PLAYER_HEIGHT  120
 #define PLAYER_WIDTH   80
-#define MONSTER_VEL_X  100
+#define MONSTER_VEL_X  50
 #define PLAYER_FOOT_HEIGHT 5
 #define DOOR_WIDTH     70
 #define DOOR_HEIGHT    80
@@ -105,6 +105,7 @@ struct GlobalState{
 	Scene curScene;
 	PackageManager pm;
 	Vector2 worldBound; // NOTE: .x contains right edge and .y contains left edge world pos
+	SpriteAnimation ai;
 };
 GlobalState *state;
 void gameReload(void *gameMem){
@@ -204,6 +205,11 @@ EXPORT void gameInit(void *gameMem){
 	img = LoadImageFromMemory(".png", (const unsigned char*)spriteSheet, size);
 	text = LoadTextureFromImage(img);
 	state->curScene.player.walk.init(text, 20, 0.04);
+	spriteSheet = state->pm.getFile("assets/slimeGreen.png", size);
+	img = LoadImageFromMemory(".png", (const unsigned char*)spriteSheet, size);
+	text = LoadTextureFromImage(img);
+	state->ai.init(text, 30, 0.05);
+
 };
 EXPORT void gameUpdate(f32 dt){
 	Scene &scene = state->curScene;
@@ -224,23 +230,25 @@ EXPORT void gameUpdate(f32 dt){
 	if(IsKeyDown(KEY_SPACE) && IS_BIT(player.prop, PlayerProp::IS_GROUND)){
 		keyDown = true;
 		player.vel.y = -800;
-	};
-	if(IsKeyDown(KEY_D)){
+	}else if(IsKeyDown(KEY_D)){
 		keyDown = true;
 		player.dir = 1;
 		player.vel.x = 200;
 		if(player.cur != &player.walk) player.cur->reset();
 		player.cur = &player.walk;
-	};
-	if(IsKeyDown(KEY_A)){
+	}else if(IsKeyDown(KEY_A)){
 		keyDown = true;
 		player.dir = -1;
 		player.vel.x = -200;
 		if(player.cur != &player.walk) player.cur->reset();
 		player.cur = &player.walk;
 	};
-	if(!keyDown) player.cur = &player.idle;
+	if(!keyDown){
+		player.cur = &player.idle;
+		player.vel.x = 0.0;
+	};
 	updateAnimation(player.cur, dt);
+	updateAnimation(&state->ai, dt);
 	f64 closest = DBL_MAX;
 	Monster *closestM = nullptr;
 	for(u32 x=0; x<monsters.len; x++){
@@ -286,7 +294,8 @@ EXPORT void gameUpdate(f32 dt){
 	};
 	for(u32 x=0; x<monsters.count; x++){
 		Monster &monster = monsters[x];
-		DrawRectangle(monster.pos.x, monster.pos.y, MONSTER_WIDTH, MONSTER_HEIGHT, ((closestM == &monster) && canSwap)?GREEN:WHITE);
+		DrawTexturePro(state->ai.texture, getFrame(&state->ai), {monster.pos.x, monster.pos.y, MONSTER_WIDTH, MONSTER_HEIGHT}, {0.0, 0.0}, 0.0, WHITE);
+		//DrawRectangle(monster.pos.x, monster.pos.y, MONSTER_WIDTH, MONSTER_HEIGHT, ((closestM == &monster) && canSwap)?GREEN:WHITE);
 	};
 	DrawRectangleRec(auraRec, {255, 0, 255, 50});
 	if(!IS_BIT(player.prop, PlayerProp::HAS_KEY) && !IS_BIT(scene.prop, SceneProp::NO_KEY)) DrawRectangleV(scene.key.pos, {KEY_WIDTH, KEY_HEIGHT}, BROWN);
@@ -312,11 +321,11 @@ EXPORT void gamePhyUpdate(){
 	doorRec.width = DOOR_WIDTH;
 	doorRec.height = DOOR_HEIGHT;
 	if(CheckCollisionRecs(playerRec, doorRec)){
-		if(player.vel.x > 0){
+		if(player.vel.x > 0 && playerRec.x < doorRec.x){
 			player.vel.x = 0;
 			player.pos.x = doorRec.x - PLAYER_WIDTH;
 		};
-		if(player.vel.x < 0){
+		if(player.vel.x < 0 && playerRec.x > doorRec.x){
 			player.vel.x = 0;
 			player.pos.x = doorRec.x + DOOR_WIDTH;
 		};
