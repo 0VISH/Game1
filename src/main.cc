@@ -11,9 +11,9 @@
 #define PLAYER_WIDTH   80
 #define MONSTER_VEL_X  50
 #define PLAYER_FOOT_HEIGHT 5
-#define DOOR_WIDTH     70
-#define DOOR_HEIGHT    80
-#define KEY_WIDTH      10
+#define DOOR_WIDTH     80
+#define DOOR_HEIGHT    125
+#define KEY_WIDTH      30
 #define KEY_HEIGHT     20
 
 #define GET_MONSTERS(swapss) ((Monster*)((char*)swapss + sizeof(SwapScreenShot)))
@@ -86,9 +86,9 @@ struct Scene{
 		player.prop = 0;
 		player.dir = 1;
 		player.cur = &player.idle;
-		plats.init(2);
-		blocks.init(2);
-		monsters.init(1);
+		plats.init(5);
+		blocks.init(5);
+		monsters.init(5);
 		camera.target = {0.0};
 		camera.offset = { GetScreenWidth()/2.0f, GetScreenHeight()/2.0f };
 		camera.rotation = 0.0f;
@@ -96,6 +96,8 @@ struct Scene{
 	};
 	void uninit(){
 		freeSwapScreenShotChain(tail);
+		player.idle.uninit();
+		player.walk.uninit();
 		plats.uninit();
 		blocks.uninit();
 		monsters.uninit();
@@ -105,61 +107,27 @@ struct GlobalState{
 	Scene curScene;
 	PackageManager pm;
 	Vector2 worldBound; // NOTE: .x contains right edge and .y contains left edge world pos
-	SpriteAnimation ai;
+	SpriteAnimation gmonster;
+	Texture2D background;
 };
 GlobalState *state;
 void gameReload(void *gameMem){
 	state = (GlobalState*)gameMem;
 };
 
-Platform PlacePlatform(f32 x, f32 y, f32 width, f32 height){
-	Platform plat;
-	plat.rec.x = x;
-	plat.rec.y = y;
-	plat.rec.width = width;
-	plat.rec.height = height;
-	return plat;
-};
-Block PlaceBlock(f32 x, f32 y){
-	Block blk;
-	blk.pos = {x, y};
-	return blk;
-};
-Monster PlaceMonster(f32 x, f32 y, f32 velx=MONSTER_VEL_X, f32 vely=0){
-	Monster monster;
-	monster.pos = {x, y};
-	monster.vel = {velx, vely};
-	return monster;
-};
-void buildScene1(){
-	Scene &scene = state->curScene;
+#include "scene.cc"
 
-	scene.player.pos = {200, -PLAYER_HEIGHT};
-	scene.player.vel = {0.0};
-	scene.player.aura = {300, 100};
-	scene.player.prop = 0;
-
-	scene.camera.zoom = 1;
-
-	scene.door.pos = {400, -100};
-	scene.key.pos = {-state->worldBound.x + KEY_WIDTH, -150-KEY_HEIGHT};
-
-	scene.monsters.push(PlaceMonster(-state->worldBound.x + MONSTER_WIDTH, -150 - MONSTER_HEIGHT));
-
-	scene.plats.push(PlacePlatform(-400, 0, 1000, 300));
-	scene.plats.push(PlacePlatform(-state->worldBound.x, -150, 550, 40));
-
-	scene.blocks.push(PlaceBlock(-state->worldBound.x + 550 - BLOCK_WIDTH, -150 - BLOCK_HEIGHT));
-	scene.blocks.push(PlaceBlock(-400+1000-BLOCK_WIDTH, 0-BLOCK_HEIGHT));
-};
 void resetCurScene(){
 	Scene &scene = state->curScene;
 	scene.plats.count = 0;
 	scene.blocks.count = 0;
 	scene.monsters.count = 0;
-	scene.loadNextLevel = nullptr;
-	scene.player = {0};
 	scene.prop = 0;
+	scene.player.idle.reset();
+	scene.player.walk.reset();
+	scene.player.cur = &scene.player.idle;
+	scene.player.prop = 0;
+	state->gmonster.reset();
 	freeSwapScreenShotChain(scene.tail);
 	scene.cur = nullptr;
 	scene.tail = nullptr;
@@ -193,23 +161,30 @@ void takeSwapScreenShot(){
 EXPORT void gameInit(void *gameMem){
 	state->curScene.init();
 	state->worldBound = GetScreenToWorld2D({(float)GetScreenWidth(), (float)GetScreenHeight()}, state->curScene.camera);
-	state->pm.init("TODO:");
+	state->pm.init("assets.pkg");
 	buildScene1();	
 	takeSwapScreenShot();
 	s32 size;
-	void *spriteSheet = state->pm.getFile("assets/idle.png", size);
+	void *spriteSheet = state->pm.getFile("assets\\idle.png", size);
+	clog("%lld\n", size);
 	Image img = LoadImageFromMemory(".png", (const unsigned char*)spriteSheet, size);
 	Texture2D text = LoadTextureFromImage(img);
 	state->curScene.player.idle.init(text, 20, 0.08);
-	spriteSheet = state->pm.getFile("assets/walk.png", size);
+	spriteSheet = state->pm.getFile("assets\\walk.png", size);
 	img = LoadImageFromMemory(".png", (const unsigned char*)spriteSheet, size);
 	text = LoadTextureFromImage(img);
+	UnloadImage(img);
 	state->curScene.player.walk.init(text, 20, 0.04);
-	spriteSheet = state->pm.getFile("assets/slimeGreen.png", size);
+	spriteSheet = state->pm.getFile("assets\\slimeGreen.png", size);
 	img = LoadImageFromMemory(".png", (const unsigned char*)spriteSheet, size);
 	text = LoadTextureFromImage(img);
-	state->ai.init(text, 30, 0.05);
-
+	UnloadImage(img);
+	state->gmonster.init(text, 30, 0.05);
+	spriteSheet = state->pm.getFile("assets\\background.png", size);
+	img = LoadImageFromMemory(".png", (const unsigned char*)spriteSheet, size);
+	text = LoadTextureFromImage(img);
+	UnloadImage(img);
+	state->background = text;
 };
 EXPORT void gameUpdate(f32 dt){
 	Scene &scene = state->curScene;
@@ -248,42 +223,47 @@ EXPORT void gameUpdate(f32 dt){
 		player.vel.x = 0.0;
 	};
 	updateAnimation(player.cur, dt);
-	updateAnimation(&state->ai, dt);
+	updateAnimation(&state->gmonster, dt);
 	f64 closest = DBL_MAX;
 	Monster *closestM = nullptr;
-	for(u32 x=0; x<monsters.len; x++){
+	for(u32 x=0; x<monsters.count; x++){
 		Monster &monster = monsters[x];
-		f64 distance = sqrt((player.pos.x*player.pos.x) + (monster.pos.x*monster.pos.x));
+		f64 distance = sqrt((player.pos.x-monster.pos.x)*(player.pos.x-monster.pos.x) + (player.pos.y-monster.pos.y)*(player.pos.y-monster.pos.y));
 		if(distance < closest){
 			closest = distance;
 			closestM = &monster;
 		};
 	};
 	b32 canSwap = false;
-	Rectangle monsterRec;
-	monsterRec.x = closestM->pos.x;
-	monsterRec.y = closestM->pos.y;
-	monsterRec.width = MONSTER_WIDTH;
-	monsterRec.height = MONSTER_HEIGHT;
 	Rectangle auraRec;
 	auraRec.x = player.pos.x-player.aura.x;
 	auraRec.y = player.pos.y-player.aura.y;
 	auraRec.width = 100 + player.aura.x*2;
 	auraRec.height = 100 + player.aura.y*2;
-	if(CheckCollisionRecs(auraRec, monsterRec)) canSwap=true;
-	if(canSwap && IsKeyPressed(KEY_E)){
-		takeSwapScreenShot();
-		Vector2 temp = closestM->pos;
-		closestM->pos = player.pos;
-		closestM->pos.y += PLAYER_HEIGHT - MONSTER_HEIGHT;
-		player.pos = temp;
-		player.pos.y += MONSTER_HEIGHT - PLAYER_HEIGHT;
+	if(closestM){
+		Rectangle monsterRec;
+		monsterRec.x = closestM->pos.x;
+		monsterRec.y = closestM->pos.y;
+		monsterRec.width = MONSTER_WIDTH;
+		monsterRec.height = MONSTER_HEIGHT;
+		if(CheckCollisionRecs(auraRec, monsterRec) && IsKeyPressed(KEY_E)){
+			takeSwapScreenShot();
+			Vector2 temp = closestM->pos;
+			closestM->pos = player.pos;
+			closestM->pos.y += PLAYER_HEIGHT - MONSTER_HEIGHT;
+			player.pos = temp;
+			player.pos.y += MONSTER_HEIGHT - PLAYER_HEIGHT;
+			canSwap = true;
+		};
 	};
 	BeginDrawing();
 	ClearBackground(PINK);
+	DrawTexturePro(state->background, getFrame(state->background, 0, 3), {0.0, 0.0, (f32)GetScreenWidth(), (f32)GetScreenHeight()}, {0.0, 0.0}, 0.0, WHITE);
+	DrawTexturePro(state->background, getFrame(state->background, 1, 3), {0.0, 0.0, (f32)GetScreenWidth(), (f32)GetScreenHeight()}, {0.0, 0.0}, 0.0, WHITE);
 	DrawFPS(0,0);
 	BeginMode2D(scene.camera);
-	Rectangle r = getFrame(player.cur);
+	DrawRectangleV(scene.door.pos, {DOOR_WIDTH, DOOR_HEIGHT}, BROWN);
+	Rectangle r = getAnimationFrame(player.cur);
 	r.width *= player.dir;
 	DrawTexturePro(player.cur->texture, r, {player.pos.x, player.pos.y, PLAYER_WIDTH, PLAYER_HEIGHT}, {0.0, 0.0}, 0.0, WHITE);
 	for(u32 x=0; x<plats.count; x++){
@@ -294,12 +274,10 @@ EXPORT void gameUpdate(f32 dt){
 	};
 	for(u32 x=0; x<monsters.count; x++){
 		Monster &monster = monsters[x];
-		DrawTexturePro(state->ai.texture, getFrame(&state->ai), {monster.pos.x, monster.pos.y, MONSTER_WIDTH, MONSTER_HEIGHT}, {0.0, 0.0}, 0.0, WHITE);
-		//DrawRectangle(monster.pos.x, monster.pos.y, MONSTER_WIDTH, MONSTER_HEIGHT, ((closestM == &monster) && canSwap)?GREEN:WHITE);
+		DrawTexturePro(state->gmonster.texture, getAnimationFrame(&state->gmonster), {monster.pos.x, monster.pos.y, MONSTER_WIDTH, MONSTER_HEIGHT}, {0.0, 0.0}, 0.0, WHITE);
 	};
 	DrawRectangleRec(auraRec, {255, 0, 255, 50});
-	if(!IS_BIT(player.prop, PlayerProp::HAS_KEY) && !IS_BIT(scene.prop, SceneProp::NO_KEY)) DrawRectangleV(scene.key.pos, {KEY_WIDTH, KEY_HEIGHT}, BROWN);
-	DrawRectangleV(scene.door.pos, {DOOR_WIDTH, DOOR_HEIGHT}, BROWN);
+	if(!IS_BIT(player.prop, PlayerProp::HAS_KEY) && !IS_BIT(scene.prop, SceneProp::NO_KEY)) DrawRectangleV(scene.key.pos, {KEY_WIDTH, KEY_HEIGHT}, {255, 215, 0, 255});
 	EndMode2D();
 	EndDrawing();
 };
@@ -330,7 +308,12 @@ EXPORT void gamePhyUpdate(){
 			player.pos.x = doorRec.x + DOOR_WIDTH;
 		};
 		if((IS_BIT(player.prop, PlayerProp::HAS_KEY) || IS_BIT(scene.prop, SceneProp::NO_KEY))){
-			clog("changing level");
+			if(scene.loadNextLevel){
+				resetCurScene();
+				scene.loadNextLevel();
+				return;
+			};
+			exitOKC();
 		};
 	};
 	Rectangle keyRec;
@@ -422,5 +405,7 @@ EXPORT void gamePhyUpdate(){
 EXPORT void gameUninit(){
 	state->curScene.uninit();
 	state->pm.uninit();
+	state->gmonster.uninit();
+	UnloadTexture(state->background);
 	clog("Bye from game 1");
 };

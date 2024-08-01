@@ -34,7 +34,11 @@ void updateAnimation(SpriteAnimation *sa, f32 dt){
     };
 };
 
-Rectangle getFrame(SpriteAnimation *sa){
-    const f32 textWidth = sa->texture.width/(f32)sa->frames;
-    return {(f32)(sa->curFrame * textWidth), 0.0f, (f32)textWidth, (f32)sa->texture.height};
+Rectangle getFrame(Texture2D text, u32 cur, u32 total){
+    const f32 frameWidth = text.width / (f32)total;
+   return {(f32)(cur * frameWidth), 0.0f, (f32)frameWidth, (f32)text.height}; 
+};
+Rectangle getAnimationFrame(SpriteAnimation *sa){
+    const f32 frameWidth = sa->texture.width/(f32)sa->frames;
+    return {(f32)(sa->curFrame * frameWidth), 0.0f, (f32)frameWidth, (f32)sa->texture.height};
 };
